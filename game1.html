@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js 第一人称游戏</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin-left: -10px;
+            margin-top: -10px;
+            color: white;
+            font-size: 20px;
+            text-align: center;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        <h2>控制说明:</h2>
+        <p>W - 前进</p>
+        <p>S - 后退</p>
+        <p>A - 左移</p>
+        <p>D - 右移</p>
+        <p>空格 - 跳跃</p>
+        <p>鼠标 - 视角控制</p>
+        <p>点击画面锁定鼠标</p>
+    </div>
+    <div id="crosshair">+</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // 锁定鼠标指针
+        document.addEventListener('click', function() {
+            document.body.requestPointerLock();
+        });
+
+        // 场景设置
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // 天蓝色背景
+
+        // 相机设置（第一人称）
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // 渲染器设置
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // 光照设置
+        const ambientLight = new THREE.AmbientLight(0x606060, 1);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(50, 100, 70);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        // 地板设置
+        const floorGeometry = new THREE.PlaneGeometry(100, 100);
+        const floorMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xA0522D,
+            roughness: 0.7,
+            metalness: 0.1
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // 障碍物材质
+        const brickMaterial = new THREE.MeshStandardMaterial({ color: 0xB22222, roughness: 0.9 });
+        const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.7 });
+        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x708090, roughness: 0.4, metalness: 0.8 });
+        const stoneMaterial = new THREE.MeshStandardMaterial({ color: 0x696969, roughness: 0.8 });
+        
+        const materials = [brickMaterial, woodMaterial, metalMaterial, stoneMaterial];
+
+        // 障碍物生成
+        function createObstacles() {
+            const obstacles = [];
+            const boundarySize = 20;
+            
+            // 生成一些随机分布的立方体
+            for (let i = 0; i < 15; i++) {
+                let x, z;
+                let validPosition = false;
+                let attempts = 0;
+                
+                while (!validPosition && attempts < 50) {
+                    x = (Math.random() * 2 - 1) * boundarySize;
+                    z = (Math.random() * 2 - 1) * boundarySize;
+                    
+                    // 避开(0,0)附近区域
+                    if (Math.abs(x) < 3 && Math.abs(z) < 3) {
+                        attempts++;
+                        continue;
+                    }
+                    
+                    // 检查是否与现有障碍物重叠
+                    let overlaps = false;
+                    for (const obstacle of obstacles) {
+                        const dx = x - obstacle.position.x;
+                        const dz = z - obstacle.position.z;
+                        const distance = Math.sqrt(dx * dx + dz * dz);
+                        if (distance < 5) { // 保持足够距离
+                            overlaps = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!overlaps) {
+                        validPosition = true;
+                    }
+                    
+                    attempts++;
+                }
+                
+                if (validPosition) {
+                    // 随机选择材质和尺寸
+                    const materialIndex = Math.floor(Math.random() * materials.length);
+                    const width = 1 + Math.random() * 3;
+                    const height = 2 + Math.random() * 4;
+                    const depth = 1 + Math.random() * 3;
+                    
+                    const geometry = new THREE.BoxGeometry(width, height, depth);
+                    const cube = new THREE.Mesh(geometry, materials[materialIndex]);
+                    cube.position.set(x, height / 2, z);
+                    cube.castShadow = true;
+                    cube.receiveShadow = true;
+                    
+                    // 随机旋转
+                    cube.rotation.y = Math.random() * Math.PI * 2;
+                    
+                    scene.add(cube);
+                    obstacles.push({
+                        mesh: cube,
+                        width: width,
+                        height: height,
+                        depth: depth,
+                        position: cube.position.clone()
+                    });
+                }
+            }
+            
+            // 添加一些拱门
+            for (let i = 0; i < 3; i++) {
+                let x, z;
+                let validPosition = false;
+                let attempts = 0;
+                
+                while (!validPosition && attempts < 50) {
+                    x = (Math.random() * 2 - 1) * boundarySize;
+                    z = (Math.random() * 2 - 1) * boundarySize;
+                    
+                    // 避开(0,0)附近区域
+                    if (Math.abs(x) < 5 && Math.abs(z) < 5) {
+                        attempts++;
+                        continue;
+                    }
+                    
+                    // 检查是否与现有障碍物重叠
+                    let overlaps = false;
+                    for (const obstacle of obstacles) {
+                        const dx = x - obstacle.position.x;
+                        const dz = z - obstacle.position.z;
+                        const distance = Math.sqrt(dx * dx + dz * dz);
+                        if (distance < 8) { // 拱门需要更大的空间
+                            overlaps = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!overlaps) {
+                        validPosition = true;
+                    }
+                    
+                    attempts++;
+                }
+                
+                if (validPosition) {
+                    const materialIndex = Math.floor(Math.random() * materials.length);
+                    const width = 5;
+                    const height = 4 + Math.random() * 2;
+                    const depth = 1;
+                    const pillarWidth = 0.6;
+                    
+                    // 创建拱门组
+                    const archGroup = new THREE.Group();
+                    
+                    // 左柱子
+                    const leftPillar = new THREE.Mesh(
+                        new THREE.BoxGeometry(pillarWidth, height, depth),
+                        materials[materialIndex]
+                    );
+                    leftPillar.position.set(-width/2 + pillarWidth/2, height/2, 0);
+                    leftPillar.castShadow = true;
+                    leftPillar.receiveShadow = true;
+                    archGroup.add(leftPillar);
+                    
+                    // 右柱子
+                    const rightPillar = new THREE.Mesh(
+                        new THREE.BoxGeometry(pillarWidth, height, depth),
+                        materials[materialIndex]
+                    );
+                    rightPillar.position.set(width/2 - pillarWidth/2, height/2, 0);
+                    rightPillar.castShadow = true;
+                    rightPillar.receiveShadow = true;
+                    archGroup.add(rightPillar);
+                    
+                    // 顶部横梁
+                    const topBeam = new THREE.Mesh(
+                        new THREE.BoxGeometry(width, pillarWidth, depth),
+                        materials[materialIndex]
+                    );
+                    topBeam.position.set(0, height - pillarWidth/2, 0);
+                    topBeam.castShadow = true;
+                    topBeam.receiveShadow = true;
+                    archGroup.add(topBeam);
+                    
+                    // 设置拱门位置和旋转
+                    archGroup.position.set(x, 0, z);
+                    archGroup.rotation.y = Math.random() * Math.PI * 2;
+                    
+                    scene.add(archGroup);
+                    
+                    obstacles.push({
+                        mesh: archGroup,
+                        type: 'arch',
+                        width: width,
+                        height: height,
+                        depth: depth,
+                        position: new THREE.Vector3(x, height/2, z),
+                        rotation: archGroup.rotation.y
+                    });
+                }
+            }
+            
+            return obstacles;
+        }
+        
+        const obstacles = createObstacles();
+
+        // 玩家设置
+        const playerHeight = 1.7;
+        const playerRadius = 0.5;
+        const eyeHeight = playerHeight - 0.1;
+        
+        // 玩家碰撞体积（用于碰撞检测，不渲染）
+        const playerGeometry = new THREE.CylinderGeometry(playerRadius, playerRadius, playerHeight, 8);
+        const playerMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xFF0000,
+            wireframe: true,
+            visible: false
+        });
+        const player = new THREE.Mesh(playerGeometry, playerMaterial);
+        player.position.y = playerHeight / 2;
+        scene.add(player);
+
+        // 设置相机为第一人称
+        camera.position.set(0, eyeHeight, 0);
+        player.add(camera);
+        
+        // 彗星轨迹系统 - 使用三角形网格模拟彗星尾巴
+        const trailSegments = [];
+        const trailMaxSegments = 200;
+        const trailWidth = 1.0; // 轨迹宽度
+        
+        // 创建彗星材质 - 使用半透明效果
+        const trailMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.8,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending
+        });
+        
+        // 存储轨迹片段
+        const trailMeshes = [];
+        
+        function updateTrail() {
+            const currentPosition = new THREE.Vector3(
+                player.position.x,
+                0.05,
+                player.position.z
+            );
+            
+            // 只有当玩家移动时才添加轨迹
+            if (trailSegments.length === 0 || 
+                currentPosition.distanceTo(trailSegments[trailSegments.length - 1].position) > 0.15) {
+                
+                // 获取移动方向（用于确定轨迹段宽度方向）
+                let direction = new THREE.Vector3();
+                if (trailSegments.length > 0) {
+                    direction.subVectors(currentPosition, trailSegments[trailSegments.length - 1].position).normalize();
+                } else {
+                    // 第一个点，使用玩家朝向
+                    direction.set(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y));
+                }
+                
+                // 计算垂直于移动方向的向量（用于创建宽度）
+                const perpendicular = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
+                
+                // 创建新的轨迹段
+                const newSegment = {
+                    position: currentPosition.clone(),
+                    perpendicular: perpendicular,
+                    timestamp: Date.now()
+                };
+                
+                trailSegments.push(newSegment);
+                
+                // 限制轨迹段数量
+                if (trailSegments.length > trailMaxSegments) {
+                    trailSegments.shift();
+                    // 如果有对应的网格，从场景中移除
+                    if (trailMeshes.length > trailMaxSegments) {
+                        const oldMesh = trailMeshes.shift();
+                        scene.remove(oldMesh);
+                    }
+                }
+                
+                // 更新所有轨迹段的网格
+                updateTrailMeshes();
+            }
+            
+            // 更新每个轨迹段的不透明度（随时间衰减）
+            updateTrailOpacity();
+        }
+        
+        function updateTrailMeshes() {
+            // 至少需要两个点才能创建轨迹段
+            if (trailSegments.length < 2) return;
+            
+            // 获取最新的两个轨迹段
+            const i = trailSegments.length - 2;
+            const segment1 = trailSegments[i];
+            const segment2 = trailSegments[i + 1];
+            
+            // 为每个轨迹段创建一个四边形（两个三角形）
+            const geometry = new THREE.BufferGeometry();
+            
+            // 创建左右两侧的点（基于垂直方向）
+            const p1Left = segment1.position.clone().add(segment1.perpendicular.clone().multiplyScalar(trailWidth));
+            const p1Right = segment1.position.clone().add(segment1.perpendicular.clone().multiplyScalar(-trailWidth));
+            const p2Left = segment2.position.clone().add(segment2.perpendicular.clone().multiplyScalar(trailWidth));
+            const p2Right = segment2.position.clone().add(segment2.perpendicular.clone().multiplyScalar(-trailWidth));
+            
+            // 创建顶点
+            const vertices = new Float32Array([
+                p1Left.x, p1Left.y, p1Left.z,
+                p1Right.x, p1Right.y, p1Right.z,
+                p2Left.x, p2Left.y, p2Left.z,
+                
+                p2Left.x, p2Left.y, p2Left.z,
+                p1Right.x, p1Right.y, p1Right.z,
+                p2Right.x, p2Right.y, p2Right.z
+            ]);
+            
+            // 为每个顶点创建不同的颜色（头部白色，尾部蓝色/紫色）
+            const colors = new Float32Array([
+                1, 1, 1, // 白色（头部）
+                1, 1, 1, 
+                0.8, 0.9, 1, // 淡蓝色
+                
+                0.8, 0.9, 1,
+                1, 1, 1,
+                0.6, 0.7, 1 // 蓝紫色
+            ]);
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            // 使用顶点颜色
+            const material = new THREE.MeshBasicMaterial({
+                vertexColors: true,
+                transparent: true,
+                opacity: 1.0,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+            
+            // 创建网格并添加到场景
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+            trailMeshes.push(mesh);
+        }
+        
+        function updateTrailOpacity() {
+            // 更新每个轨迹段的不透明度
+            const now = Date.now();
+            for (let i = 0; i < trailMeshes.length; i++) {
+                if (i < trailSegments.length) {
+                    const age = (now - trailSegments[i].timestamp) / 5000; // 5秒完全消失
+                    const opacity = Math.max(0, 1 - age);
+                    trailMeshes[i].material.opacity = opacity;
+                }
+            }
+        }
+
+        // 鼠标视角控制
+        let pitch = 0;
+        let yaw = 0;
+        const pitchLimit = Math.PI / 2 - 0.1;
+        
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === document.body) {
+                // 水平旋转（绕Y轴）
+                yaw -= e.movementX * 0.002;
+                player.rotation.y = yaw;
+                
+                // 垂直旋转（俯仰，限制在±pitchLimit范围内）
+                pitch -= e.movementY * 0.002;
+                pitch = Math.max(-pitchLimit, Math.min(pitchLimit, pitch));
+                camera.rotation.x = pitch;
+            }
+        });
+
+        // 游戏物理和控制
+        const velocity = new THREE.Vector3();
+        const playerSpeed = 0.12;
+        const jumpForce = 0.2;
+        const gravity = 0.007;
+        let isJumping = false;
+        let canJump = true;
+
+        // 键盘状态
+        const keyboard = {};
+
+        // 键盘事件监听
+        window.addEventListener('keydown', (e) => {
+            keyboard[e.key.toLowerCase()] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keyboard[e.key.toLowerCase()] = false;
+        });
+
+        // 窗口调整大小处理
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 碰撞检测
+        function checkCollisions() {
+            // 边界检查
+            const boundaryLimit = 24;
+            if (Math.abs(player.position.x) > boundaryLimit) {
+                player.position.x = Math.sign(player.position.x) * boundaryLimit;
+            }
+            if (Math.abs(player.position.z) > boundaryLimit) {
+                player.position.z = Math.sign(player.position.z) * boundaryLimit;
+            }
+            
+            // 遍历所有障碍物进行碰撞检测
+            for (const obstacle of obstacles) {
+                if (obstacle.type === 'arch') {
+                    // 处理拱门碰撞
+                    const playerPos = player.position.clone();
+                    const obstaclePos = new THREE.Vector3(obstacle.position.x, 0, obstacle.position.z);
+                    const distance = playerPos.distanceTo(obstaclePos);
+                    
+                    // 简化的碰撞检测
+                    if (distance < obstacle.width / 2 + playerRadius) {
+                        const dx = playerPos.x - obstaclePos.x;
+                        const dz = playerPos.z - obstaclePos.z;
+                        const pushDirection = new THREE.Vector3(dx, 0, dz).normalize();
+                        
+                        player.position.x += pushDirection.x * 0.2;
+                        player.position.z += pushDirection.z * 0.2;
+                    }
+                } else {
+                    // 处理普通立方体碰撞
+                    const playerPos = player.position.clone();
+                    const obstaclePos = obstacle.position;
+                    const dx = playerPos.x - obstaclePos.x;
+                    const dz = playerPos.z - obstaclePos.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    const minDistance = playerRadius + Math.max(obstacle.width, obstacle.depth) / 2;
+                    
+                    if (distance < minDistance) {
+                        const pushDirection = new THREE.Vector3(dx, 0, dz).normalize();
+                        const pushAmount = minDistance - distance + 0.1;
+                        
+                        player.position.x += pushDirection.x * pushAmount;
+                        player.position.z += pushDirection.z * pushAmount;
+                        
+                        const dot = velocity.x * pushDirection.x + velocity.z * pushDirection.z;
+                        if (dot < 0) {
+                            velocity.x -= pushDirection.x * dot;
+                            velocity.z -= pushDirection.z * dot;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 游戏循环
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 处理移动和跳跃逻辑
+            handleMovement();
+            
+            // 应用物理
+            applyPhysics();
+            
+            // 碰撞检测
+            checkCollisions();
+            
+            // 更新轨迹
+            updateTrail();
+            
+            // 渲染场景
+            renderer.render(scene, camera);
+        }
+
+        function handleMovement() {
+            // 重置移动方向
+            const moveDirection = new THREE.Vector3();
+            
+            // 根据相机朝向计算移动方向
+            const cameraDirection = new THREE.Vector3();
+            camera.getWorldDirection(cameraDirection);
+            cameraDirection.y = 0; // 保持水平移动
+            cameraDirection.normalize();
+            
+            // 计算右向量（叉乘垂直向上方向）
+            const rightVector = new THREE.Vector3();
+            rightVector.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+            
+            // 根据按键应用移动方向
+            if (keyboard['w']) moveDirection.add(cameraDirection);
+            if (keyboard['s']) moveDirection.sub(cameraDirection);
+            if (keyboard['a']) moveDirection.sub(rightVector);
+            if (keyboard['d']) moveDirection.add(rightVector);
+            
+            // 归一化移动向量以获得一致的速度
+            if (moveDirection.length() > 0) {
+                moveDirection.normalize();
+                
+                // 应用速度
+                velocity.x = moveDirection.x * playerSpeed;
+                velocity.z = moveDirection.z * playerSpeed;
+            } else {
+                // 如果没有移动输入，减缓水平速度
+                velocity.x *= 0.9;
+                velocity.z *= 0.9;
+            }
+            
+            // 处理跳跃
+            if (keyboard[' '] && canJump && !isJumping) {
+                velocity.y = jumpForce;
+                isJumping = true;
+                canJump = false;
+                
+                // 防止连续跳跃
+                setTimeout(() => {
+                    canJump = true;
+                }, 300);
+            }
+        }
+
+        function applyPhysics() {
+            // 应用重力
+            velocity.y -= gravity;
+            
+            // 更新位置
+            player.position.x += velocity.x;
+            player.position.y += velocity.y;
+            player.position.z += velocity.z;
+            
+            // 地面碰撞检测
+            if (player.position.y < playerHeight / 2) {
+                player.position.y = playerHeight / 2;
+                velocity.y = 0;
+                isJumping = false;
+            }
+        }
+
+        // 开始游戏循环
+        animate();
+    </script>
+</body>
+</html>
